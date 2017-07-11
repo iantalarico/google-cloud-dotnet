@@ -44,11 +44,6 @@ namespace Google.Cloud.Diagnostics.Common
         public IDisposable StartSpan(string name, StartSpanOptions options = null) => new NullDisposable();
 
         /// <summary>
-        /// Does nothing.
-        /// </summary>
-        public void EndSpan() { }
-
-        /// <summary>
         /// Calls <paramref name="action"/>.
         /// </summary>
         public void RunInSpan(Action action, string name, StartSpanOptions options = null) => action();

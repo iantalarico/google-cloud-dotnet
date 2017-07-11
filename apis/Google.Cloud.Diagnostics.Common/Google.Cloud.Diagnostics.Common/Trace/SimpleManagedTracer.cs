@@ -182,12 +182,6 @@ namespace Google.Cloud.Diagnostics.Common
             }
         }
 
-        /// <inheritdoc />
-        public void EndSpan()
-        {
-            EndSpan(null);
-        }
-
         private void EndSpan(Span span2)
         {
             var currentStack = TraceStack;

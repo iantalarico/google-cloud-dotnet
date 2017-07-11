@@ -76,7 +76,6 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                     t => IsValidSpan(t.Single().Spans.Single(), "span-name"))));
 
             tracer.StartSpan("span-name").Dispose();
-            //tracer.EndSpan();
             mockConsumer.VerifyAll();
         }
 
@@ -536,10 +535,12 @@ namespace Google.Cloud.Diagnostics.Common.Tests
         }
 
         [Fact]
-        public void EndSpan_NoAvailableSpan()
+        public void Dispose_Twice_NoAvailableSpan()
         {
             var tracer = SimpleManagedTracer.Create(UnusedConsumer, ProjectId, TraceId);
-            Assert.Throws<InvalidOperationException>(() => tracer.EndSpan());
+            var span = tracer.StartSpan("span");
+            span.Dispose();
+            Assert.Throws<InvalidOperationException>(() => span.Dispose());
         }
 
         [Fact]
