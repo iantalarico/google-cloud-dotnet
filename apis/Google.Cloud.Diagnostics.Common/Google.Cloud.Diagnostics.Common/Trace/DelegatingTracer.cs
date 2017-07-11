@@ -50,9 +50,6 @@ namespace Google.Cloud.Diagnostics.Common
             _managedTracerGetter().RunInSpan(func, name, options);
 
         /// <inheritdoc />
-        public void EndSpan() => _managedTracerGetter().EndSpan();
-
-        /// <inheritdoc />
         public void AnnotateSpan(Dictionary<string, string> labels) => _managedTracerGetter().AnnotateSpan(labels);
 
         /// <inheritdoc />

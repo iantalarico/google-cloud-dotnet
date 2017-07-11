@@ -35,7 +35,7 @@ namespace Google.Cloud.Diagnostics.Common
         /// </summary>
         private class Span : IDisposable
         {
-            public bool Disposed { get; private set; }
+            public bool Disposed => TraceSpan.EndTime != null;
 
             public TraceSpan TraceSpan { get; private set; }
 
@@ -50,7 +50,7 @@ namespace Google.Cloud.Diagnostics.Common
             /// <summary> Ends the current span.</summary>
             public void Dispose()
             {
-                Disposed = true;
+                GaxPreconditions.CheckState(!Disposed, "Span cannot be disposed twice.");
                 TraceSpan.EndTime = Timestamp.FromDateTime(DateTime.UtcNow);
                 _tracer.EndSpan(this);
             }
@@ -109,15 +109,12 @@ namespace Google.Cloud.Diagnostics.Common
             var currentStack = TraceStack;
 
             var parentSpanId = currentStack.IsEmpty ? _rootSpanParentId : currentStack.Peek().TraceSpan.SpanId;//GetCurrentSpanId(currentStack).GetValueOrDefault();
-            //var parentSpanId = GetCurrentSpanId(currentStack).GetValueOrDefault();
 
             Span spanOut = null;
             while (!currentStack.IsEmpty && currentStack.Peek().Disposed)
             {
                 currentStack = currentStack.Pop(out spanOut);
             }
-            //var parentSpanId = GetCurrentSpanId(currentStack).GetValueOrDefault();
-
 
             var traceSpan = new TraceSpan
             {
@@ -125,7 +122,7 @@ namespace Google.Cloud.Diagnostics.Common
                 Kind = options.SpanKind.Convert(),
                 Name = name,
                 StartTime = Timestamp.FromDateTime(DateTime.UtcNow),
-                ParentSpanId = parentSpanId ?? 0
+                ParentSpanId = parentSpanId.GetValueOrDefault()
             };
             AnnotateSpan(traceSpan, options.Labels);
 
@@ -196,12 +193,6 @@ namespace Google.Cloud.Diagnostics.Common
             var currentStack = TraceStack;
             CheckStackNotEmpty(currentStack);
 
-            //TraceSpan span;
-            //currentStack = currentStack.Pop(out span);
-            //TraceStack = currentStack;
-            //span.EndTime = Timestamp.FromDateTime(DateTime.UtcNow);
-
-
             Span spanOut = null;
             while (!currentStack.IsEmpty && currentStack.Peek().Disposed)
             {
@@ -223,7 +214,6 @@ namespace Google.Cloud.Diagnostics.Common
             {
                 TraceStack = currentStack;
             }
-            //spanOut = spanOut ?? currentStack.Peek();
 
             lock (_traceLock)
             {
