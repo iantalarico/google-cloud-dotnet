@@ -75,8 +75,8 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                 Match.Create<IEnumerable<TraceProto>>(
                     t => IsValidSpan(t.Single().Spans.Single(), "span-name"))));
 
-            tracer.StartSpan("span-name");
-            tracer.EndSpan();
+            tracer.StartSpan("span-name").Dispose();
+            //tracer.EndSpan();
             mockConsumer.VerifyAll();
         }
 
@@ -90,7 +90,7 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                 Match.Create<IEnumerable<TraceProto>>(
                     t => IsValidSpan(t.Single().Spans.Single(), "span-name"))));
 
-            using (tracer.StartSpan("span-name")) { }
+            tracer.StartSpan("span-name").Dispose();
             mockConsumer.VerifyAll();
         }
 
@@ -104,8 +104,7 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                 Match.Create<IEnumerable<TraceProto>>(
                     t => IsValidSpan(t.Single().Spans.Single(), "span-name", 123))));
 
-            tracer.StartSpan("span-name");
-            tracer.EndSpan();
+            tracer.StartSpan("span-name").Dispose();
             mockConsumer.VerifyAll();
         }
 
@@ -124,8 +123,7 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                         && TraceUtils.IsValidAnnotation(t.ElementAt(0).Spans[0], annotation))));
 
             var options = StartSpanOptions.Create(SpanKind.RpcClient, annotation);
-            tracer.StartSpan("span-name", options);
-            tracer.EndSpan();
+            tracer.StartSpan("span-name", options).Dispose();
             mockConsumer.VerifyAll();
         }
 
@@ -143,9 +141,10 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                     t => IsValidSpan(t.Single().Spans.Single(), "span-name") &&
                         TraceUtils.IsValidAnnotation(t.ElementAt(0).Spans[0], annotation))));
 
-            tracer.StartSpan("span-name");
-            tracer.AnnotateSpan(annotation);
-            tracer.EndSpan();
+            using (tracer.StartSpan("span-name"))
+            {
+                tracer.AnnotateSpan(annotation);
+            }               
             mockConsumer.VerifyAll();
         }
 
@@ -163,9 +162,10 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                     t => IsValidSpan(t.Single().Spans.Single(), "span-name") &&
                         !string.IsNullOrWhiteSpace(t.ElementAt(0).Spans[0].Labels[TraceLabels.StackTrace]))));
 
-            tracer.StartSpan("span-name");
-            tracer.SetStackTrace(FilledStackTrace);
-            tracer.EndSpan();
+            using (tracer.StartSpan("span-name"))
+            {
+                tracer.SetStackTrace(FilledStackTrace);
+            }                
             mockConsumer.VerifyAll();
         }
 
@@ -240,18 +240,21 @@ namespace Google.Cloud.Diagnostics.Common.Tests
             };
             mockConsumer.Setup(c => c.Receive(Match.Create(matcher)));
 
-            tracer.StartSpan("root");
-            tracer.StartSpan("child-one");
-            tracer.SetStackTrace(FilledStackTrace);
-            tracer.EndSpan();
-            tracer.StartSpan("child-two");
-            tracer.StartSpan("grandchild-one", StartSpanOptions.Create(SpanKind.RpcClient));
-            tracer.EndSpan();
-            tracer.StartSpan("grandchild-two");
-            tracer.AnnotateSpan(annotation);
-            tracer.EndSpan();
-            tracer.EndSpan();
-            tracer.EndSpan();
+            using (tracer.StartSpan("root"))
+            {
+                using (tracer.StartSpan("child-one"))
+                {
+                    tracer.SetStackTrace(FilledStackTrace);
+                }
+                using (tracer.StartSpan("child-two"))
+                {
+                    using (tracer.StartSpan("grandchild-one", StartSpanOptions.Create(SpanKind.RpcClient))) { }
+                    using (tracer.StartSpan("grandchild-two"))
+                    {
+                        tracer.AnnotateSpan(annotation);
+                    }
+                }
+            }
             mockConsumer.VerifyAll();
         }
 
@@ -501,11 +504,11 @@ namespace Google.Cloud.Diagnostics.Common.Tests
             var mockConsumer = new Mock<IConsumer<TraceProto>>();
             var tracer = SimpleManagedTracer.Create(mockConsumer.Object, ProjectId, TraceId);
 
-            tracer.StartSpan("span-name-0");
-            tracer.StartSpan("span-name-1");
-            tracer.StartSpan("span-name-2");
-            tracer.EndSpan();
-            tracer.EndSpan();
+            var one = tracer.StartSpan("span-name-0");
+            var two = tracer.StartSpan("span-name-1");
+            var three = tracer.StartSpan("span-name-2");
+            three.Dispose();
+            two.Dispose();
             mockConsumer.Verify(c => c.Receive(It.IsAny<IEnumerable<TraceProto>>()), Times.Never());
         }
 
@@ -519,8 +522,7 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                  Match.Create<IEnumerable<TraceProto>>(
                      t => IsValidSpan(t.Single().Spans.Single(), "span-name-0"))));
 
-            tracer.StartSpan("span-name-0");
-            tracer.EndSpan();
+            tracer.StartSpan("span-name-0").Dispose();
 
             mockConsumer.VerifyAll();
 
@@ -528,8 +530,7 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                 Match.Create<IEnumerable<TraceProto>>(
                     t => IsValidSpan(t.Single().Spans.Single(), "span-name-1"))));
 
-            tracer.StartSpan("span-name-1");
-            tracer.EndSpan();
+            tracer.StartSpan("span-name-1").Dispose();
 
             mockConsumer.VerifyAll();
         }

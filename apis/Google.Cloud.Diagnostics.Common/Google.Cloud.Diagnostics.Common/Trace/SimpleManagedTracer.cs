@@ -20,6 +20,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+
 using TraceProto = Google.Cloud.Trace.V1.Trace;
 
 namespace Google.Cloud.Diagnostics.Common
@@ -34,11 +35,25 @@ namespace Google.Cloud.Diagnostics.Common
         /// </summary>
         private class Span : IDisposable
         {
+            public bool Disposed { get; private set; }
+
+            public TraceSpan TraceSpan { get; private set; }
+
             private readonly SimpleManagedTracer _tracer;
-            public Span(SimpleManagedTracer tracer) { _tracer = tracer; }
+            
+            public Span(SimpleManagedTracer tracer, TraceSpan traceSpan)
+            {
+                _tracer = GaxPreconditions.CheckNotNull(tracer, nameof(tracer));
+                TraceSpan = GaxPreconditions.CheckNotNull(traceSpan, nameof(traceSpan));
+            }
 
             /// <summary> Ends the current span.</summary>
-            public void Dispose() => _tracer.EndSpan();
+            public void Dispose()
+            {
+                Disposed = true;
+                TraceSpan.EndTime = Timestamp.FromDateTime(DateTime.UtcNow);
+                _tracer.EndSpan(this);
+            }
         }
 
         /// <summary>The trace consumer to push the trace to when completed.</summary>
@@ -92,20 +107,33 @@ namespace Google.Cloud.Diagnostics.Common
             options = options ?? StartSpanOptions.Create();
 
             var currentStack = TraceStack;
-            var span = new TraceSpan
+
+            var parentSpanId = currentStack.IsEmpty ? _rootSpanParentId : currentStack.Peek().TraceSpan.SpanId;//GetCurrentSpanId(currentStack).GetValueOrDefault();
+            //var parentSpanId = GetCurrentSpanId(currentStack).GetValueOrDefault();
+
+            Span spanOut = null;
+            while (!currentStack.IsEmpty && currentStack.Peek().Disposed)
+            {
+                currentStack = currentStack.Pop(out spanOut);
+            }
+            //var parentSpanId = GetCurrentSpanId(currentStack).GetValueOrDefault();
+
+
+            var traceSpan = new TraceSpan
             {
                 SpanId = _spanIdFactory.NextId(),
                 Kind = options.SpanKind.Convert(),
                 Name = name,
                 StartTime = Timestamp.FromDateTime(DateTime.UtcNow),
-                ParentSpanId = GetCurrentSpanId(currentStack).GetValueOrDefault()
+                ParentSpanId = parentSpanId ?? 0
             };
-            AnnotateSpan(span, options.Labels);
+            AnnotateSpan(traceSpan, options.Labels);
 
+            var span = new Span(this, traceSpan);
             TraceStack = currentStack.Push(span);
 
             Interlocked.Increment(ref _openSpanCount);
-            return new Span(this);
+            return span;
         }
 
         /// <inheritdoc />
@@ -160,17 +188,46 @@ namespace Google.Cloud.Diagnostics.Common
         /// <inheritdoc />
         public void EndSpan()
         {
+            EndSpan(null);
+        }
+
+        private void EndSpan(Span span2)
+        {
             var currentStack = TraceStack;
             CheckStackNotEmpty(currentStack);
 
-            TraceSpan span;
-            currentStack = currentStack.Pop(out span);
-            TraceStack = currentStack;
-            span.EndTime = Timestamp.FromDateTime(DateTime.UtcNow);
+            //TraceSpan span;
+            //currentStack = currentStack.Pop(out span);
+            //TraceStack = currentStack;
+            //span.EndTime = Timestamp.FromDateTime(DateTime.UtcNow);
+
+
+            Span spanOut = null;
+            while (!currentStack.IsEmpty && currentStack.Peek().Disposed)
+            {
+                currentStack = currentStack.Pop(out spanOut);
+            }
+            if (spanOut == null)
+            {
+                spanOut = currentStack.Peek();
+                if (spanOut.TraceSpan.SpanId == span2.TraceSpan.SpanId)
+                {
+                    TraceStack = currentStack.Pop(out spanOut);
+                }
+                else
+                {
+                    TraceStack = currentStack;
+                }
+            }
+            else
+            {
+                TraceStack = currentStack;
+            }
+            //spanOut = spanOut ?? currentStack.Peek();
 
             lock (_traceLock)
             {
-                _trace.Spans.Add(span);
+                _trace.Spans.Add(spanOut.TraceSpan);
 
                 var newOpenSpanCount = Interlocked.Decrement(ref _openSpanCount);
                 Debug.Assert(newOpenSpanCount >= 0, "Invalid open span count");
@@ -189,7 +246,7 @@ namespace Google.Cloud.Diagnostics.Common
             var currentStack = TraceStack;
             CheckStackNotEmpty(currentStack);
 
-            AnnotateSpan(currentStack.Peek(), labels);
+            AnnotateSpan(currentStack.Peek().TraceSpan, labels);
         }
 
         /// <summary>
@@ -210,7 +267,7 @@ namespace Google.Cloud.Diagnostics.Common
             var currentStack = TraceStack;
             CheckStackNotEmpty(currentStack);
 
-            AnnotateSpan(currentStack.Peek(), TraceLabels.FromStackTrace(stackTrace));
+            AnnotateSpan(currentStack.Peek().TraceSpan, TraceLabels.FromStackTrace(stackTrace));
         }
 
         /// <inheritdoc />
@@ -225,8 +282,26 @@ namespace Google.Cloud.Diagnostics.Common
         /// <summary>
         /// Gets the current span id of the specified stack or null if none exists.
         /// </summary>
-        private ulong? GetCurrentSpanId(ImmutableStack<TraceSpan> traceStack)
-            => traceStack.IsEmpty ? _rootSpanParentId : traceStack.Peek().SpanId;
+        private ulong? GetCurrentSpanId(ImmutableStack<Span> traceStack)
+        {
+            if (traceStack.IsEmpty)
+            {
+                return _rootSpanParentId;
+            }
+
+            Span spanOut = null;
+            while (!traceStack.IsEmpty && traceStack.Peek().Disposed)
+            {
+                traceStack = traceStack.Pop(out spanOut);
+            }
+
+            if (!traceStack.IsEmpty)
+            {
+                return traceStack.Peek().TraceSpan.SpanId;
+            }
+            return  _rootSpanParentId;
+        }
+
 
         /// <summary>
         /// Sets a <see cref="StackTrace"/> on the current span for the given exception and
@@ -239,7 +314,7 @@ namespace Google.Cloud.Diagnostics.Common
             return false;
         }
 
-        private void CheckStackNotEmpty(ImmutableStack<TraceSpan> traceStack)
+        private void CheckStackNotEmpty(ImmutableStack<Span> traceStack)
         {
             GaxPreconditions.CheckState(!traceStack.IsEmpty, "No available span.");
         }
@@ -265,12 +340,12 @@ namespace Google.Cloud.Diagnostics.Common
         /// </summary>
 #if NET45
         private readonly string _callContextName = Guid.NewGuid().ToString("N");
-        private ImmutableStack<TraceSpan> TraceStack
+        private ImmutableStack<Span> TraceStack
         {
             get
             {
-                var ret = System.Runtime.Remoting.Messaging.CallContext.LogicalGetData(_callContextName) as ImmutableStack<TraceSpan>;
-                return ret ?? ImmutableStack<TraceSpan>.Empty;
+                var ret = System.Runtime.Remoting.Messaging.CallContext.LogicalGetData(_callContextName) as ImmutableStack<Span>;
+                return ret ?? ImmutableStack<Span>.Empty;
             }
             set
             {
@@ -278,12 +353,12 @@ namespace Google.Cloud.Diagnostics.Common
             }
         }
 #else
-        private readonly AsyncLocal<ImmutableStack<TraceSpan>> _traceStack = new AsyncLocal<ImmutableStack<TraceSpan>>();
-        private ImmutableStack<TraceSpan> TraceStack
+        private readonly AsyncLocal<ImmutableStack<Span>> _traceStack = new AsyncLocal<ImmutableStack<Span>>();
+        private ImmutableStack<Span> TraceStack
         {
             get
             {
-                return _traceStack.Value ?? ImmutableStack<TraceSpan>.Empty;
+                return _traceStack.Value ?? ImmutableStack<Span>.Empty;
             }
             set
             {
