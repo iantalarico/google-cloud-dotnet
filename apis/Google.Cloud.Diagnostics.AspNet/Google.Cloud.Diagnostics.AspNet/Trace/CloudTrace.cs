@@ -107,7 +107,7 @@ namespace Google.Cloud.Diagnostics.AspNet
         public static TraceHeaderPropagatingHandler CreateTracingHttpMessageHandler() =>
             new TraceHeaderPropagatingHandler(() => Tracer);
 
-        internal CloudTrace(string projectId, TraceOptions options = null, TraceServiceClient client = null,
+        private CloudTrace(string projectId, TraceOptions options = null, TraceServiceClient client = null,
             TraceDecisionPredicate traceFallbackPredicate = null)
         {
             GaxPreconditions.CheckNotNull(projectId, nameof(projectId));

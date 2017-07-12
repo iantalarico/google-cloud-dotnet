@@ -128,15 +128,13 @@ namespace Google.Cloud.Diagnostics.Common
             options = options ?? StartSpanOptions.Create();
 
             var currentStack = TraceStack;
-            var parentSpanId = currentStack.IsEmpty ? _rootSpanParentId : currentStack.Peek().TraceSpan.SpanId;
-
             var traceSpan = new TraceSpan
             {
                 SpanId = _spanIdFactory.NextId(),
                 Kind = options.SpanKind.Convert(),
                 Name = name,
                 StartTime = Timestamp.FromDateTime(DateTime.UtcNow),
-                ParentSpanId = parentSpanId.GetValueOrDefault()
+                ParentSpanId = GetCurrentSpanId(currentStack).GetValueOrDefault()
             };
             AnnotateSpan(traceSpan, options.Labels);
 
@@ -256,39 +254,16 @@ namespace Google.Cloud.Diagnostics.Common
         }
 
         /// <inheritdoc />
-        public string GetCurrentTraceId()
-        {
-            return _trace.TraceId;
-        }
-
+        public string GetCurrentTraceId() =>_trace.TraceId;
+        
         /// <inheritdoc />
         public ulong? GetCurrentSpanId() => GetCurrentSpanId(TraceStack);
 
         /// <summary>
         /// Gets the current span id of the specified stack or null if none exists.
         /// </summary>
-        private ulong? GetCurrentSpanId(ImmutableStack<Span> traceStack)
-        {
-            return traceStack.IsEmpty? _rootSpanParentId : traceStack.Peek().TraceSpan.SpanId;
-            /*
-            if (traceStack.IsEmpty)
-            {
-                return _rootSpanParentId;
-            }
-
-            Span spanOut = null;
-            while (!traceStack.IsEmpty && traceStack.Peek().Disposed)
-            {
-                traceStack = traceStack.Pop(out spanOut);
-            }
-
-            if (!traceStack.IsEmpty)
-            {
-                return traceStack.Peek().TraceSpan.SpanId;
-            }
-            return  _rootSpanParentId;*/
-        }
-
+        private ulong? GetCurrentSpanId(ImmutableStack<Span> traceStack) =>
+            traceStack.IsEmpty? _rootSpanParentId : traceStack.Peek().TraceSpan.SpanId;
 
         /// <summary>
         /// Sets a <see cref="StackTrace"/> on the current span for the given exception and

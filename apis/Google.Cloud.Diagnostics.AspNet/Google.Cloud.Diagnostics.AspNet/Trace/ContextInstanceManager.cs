@@ -32,6 +32,5 @@ namespace Google.Cloud.Diagnostics.AspNet
         /// Gets the current value for a type.
         /// </summary>
         public static T Get<T>() => (T)HttpContext.Current.Items[typeof(T)];
-
     }
 }

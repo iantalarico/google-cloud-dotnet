@@ -77,6 +77,5 @@ namespace Google.Cloud.Diagnostics.Common
         /// Creates an <see cref="IManagedTracer"/> where the parent of all root spans is this <see cref="ISpan"/>.
         /// </summary>
         IManagedTracer CreateManagedTracer();
-
     }
 }
