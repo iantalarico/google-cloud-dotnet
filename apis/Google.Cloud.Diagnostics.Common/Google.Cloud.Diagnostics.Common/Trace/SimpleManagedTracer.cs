@@ -33,7 +33,7 @@ namespace Google.Cloud.Diagnostics.Common
         /// <summary>
         /// A class that represents a trace span.
         /// </summary>
-        public class Span : ISpan
+        public sealed class Span : ISpan
         {
             internal TraceSpan TraceSpan { get; private set; }
 

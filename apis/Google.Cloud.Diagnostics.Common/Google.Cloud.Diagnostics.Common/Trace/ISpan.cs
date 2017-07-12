@@ -22,30 +22,32 @@ namespace Google.Cloud.Diagnostics.Common
     /// A trace span.
     /// <remark>
     /// The functions here, aside from <see cref="IDisposable.Dispose"/>, do not need to be used in most cases. 
-    /// They need to be used when updating the current span or starting a new span where you would like the 
-    /// current span to be the parent in a disjoint thread. For example:
+    /// They need to be used when updating the current span or starting a new span when the current span in a
+    /// disjoint thread. For example:
     /// <code>
     /// public void DoSomething(IManagedTracer tracer)
     /// {
+    ///     var tcs = new TaskCompletionSource&lt;bool&gt;();
     ///     ISpan span1 = null;
     ///     Thread t = new Thread(() => 
     ///     {
-    ///         span1 = tracer.StartSpan(nameof(DoSomething))
+    ///         span1 = tracer.StartSpan(nameof(DoSomething));
+    ///         tcs.SetResult(true);
     ///     });
     ///     Thread t2 = new Thread(() =>
     ///     {
-    ///         var tracer2 = span.CreateManagedTracer();
-    ///         // This span ('span2'_ will be a child of 'span1'.
+    ///         var temp = tcs1.Task.Result;
+    ///         var tracer2 = span1.CreateManagedTracer();
+    ///         // This span ('span2') will be a child of 'span1'.
     ///         using (tracer2.StartSpan("thread"))
     ///         {
     ///             ...
     ///         }
-    ///         span1.AnnotateSpan(new Dictionary&lt;string, string&gt;  { { "new", "label"} });
+    ///         span1.AnnotateSpan(new Dictionary&lt;string, string&gt; { { "new", "label"} });
     ///         span1.Dispose();
     ///     });
     ///     
     ///     t.Start();
-    ///     Thread.Sleep(TimeSpan.FromSeconds(1));
     ///     t2.Start();
     /// }
     /// </code>

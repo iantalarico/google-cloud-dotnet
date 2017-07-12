@@ -25,8 +25,8 @@ namespace Google.Cloud.Diagnostics.AspNet
         /// <summary>
         /// Sets the current value for a type.
         /// </summary>
-        public static void Set<T>(T tracer) => 
-            HttpContext.Current.Items[typeof(T)] = tracer;
+        public static void Set<T>(T obj) => 
+            HttpContext.Current.Items[typeof(T)] = obj;
 
         /// <summary>
         /// Gets the current value for a type.
