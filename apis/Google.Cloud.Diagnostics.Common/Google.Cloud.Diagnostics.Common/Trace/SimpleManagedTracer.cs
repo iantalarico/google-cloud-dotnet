@@ -31,17 +31,17 @@ namespace Google.Cloud.Diagnostics.Common
     internal sealed class SimpleManagedTracer : IManagedTracer
     {
         /// <summary>
-        /// A class that represents a running trace span.
+        /// A class that represents a trace span.
         /// </summary>
-        private class Span : IDisposable
+        public class Span : ISpan
         {
-            public bool Disposed => TraceSpan.EndTime != null;
-
-            public TraceSpan TraceSpan { get; private set; }
+            internal TraceSpan TraceSpan { get; private set; }
 
             private readonly SimpleManagedTracer _tracer;
-            
-            public Span(SimpleManagedTracer tracer, TraceSpan traceSpan)
+
+            private readonly object _mutex = new object();
+
+            internal Span(SimpleManagedTracer tracer, TraceSpan traceSpan)
             {
                 _tracer = GaxPreconditions.CheckNotNull(tracer, nameof(tracer));
                 TraceSpan = GaxPreconditions.CheckNotNull(traceSpan, nameof(traceSpan));
@@ -50,10 +50,31 @@ namespace Google.Cloud.Diagnostics.Common
             /// <summary> Ends the current span.</summary>
             public void Dispose()
             {
-                GaxPreconditions.CheckState(!Disposed, "Span cannot be disposed twice.");
-                TraceSpan.EndTime = Timestamp.FromDateTime(DateTime.UtcNow);
+                lock (_mutex)
+                {
+                    GaxPreconditions.CheckState(!Disposed(), "Span cannot be disposed twice.");
+                    TraceSpan.EndTime = Timestamp.FromDateTime(DateTime.UtcNow);
+                }
                 _tracer.EndSpan(this);
             }
+
+            /// <inheritdoc />
+            public bool Disposed() => TraceSpan.EndTime != null;
+
+            /// <inheritdoc />
+            public void AnnotateSpan(Dictionary<string, string> labels)
+                =>_tracer.AnnotateSpan(TraceSpan, labels);
+
+            /// <inheritdoc />
+            public void SetStackTrace(StackTrace stackTrace) => 
+                AnnotateSpan(TraceLabels.FromStackTrace(stackTrace));
+
+            /// <inheritdoc />
+            public ulong SpanId() => TraceSpan.SpanId;
+
+            /// <inheritdoc />
+            public IManagedTracer CreateManagedTracer() =>
+                Create(_tracer._consumer, _tracer._projectId, _tracer.GetCurrentTraceId(), TraceSpan.SpanId);
         }
 
         /// <summary>The trace consumer to push the trace to when completed.</summary>
@@ -101,20 +122,13 @@ namespace Google.Cloud.Diagnostics.Common
             => new SimpleManagedTracer(consumer, projectId, traceId, rootSpanParentId);
 
         /// <inheritdoc />
-        public IDisposable StartSpan(string name, StartSpanOptions options = null)
+        public ISpan StartSpan(string name, StartSpanOptions options = null)
         {
             GaxPreconditions.CheckNotNull(name, nameof(name));
             options = options ?? StartSpanOptions.Create();
 
             var currentStack = TraceStack;
-
-            var parentSpanId = currentStack.IsEmpty ? _rootSpanParentId : currentStack.Peek().TraceSpan.SpanId;//GetCurrentSpanId(currentStack).GetValueOrDefault();
-
-            Span spanOut = null;
-            while (!currentStack.IsEmpty && currentStack.Peek().Disposed)
-            {
-                currentStack = currentStack.Pop(out spanOut);
-            }
+            var parentSpanId = currentStack.IsEmpty ? _rootSpanParentId : currentStack.Peek().TraceSpan.SpanId;
 
             var traceSpan = new TraceSpan
             {
@@ -182,36 +196,23 @@ namespace Google.Cloud.Diagnostics.Common
             }
         }
 
-        private void EndSpan(Span span2)
+        private void EndSpan(Span span)
         {
             var currentStack = TraceStack;
-            CheckStackNotEmpty(currentStack);
-
-            Span spanOut = null;
-            while (!currentStack.IsEmpty && currentStack.Peek().Disposed)
+            if (!currentStack.IsEmpty)
             {
-                currentStack = currentStack.Pop(out spanOut);
-            }
-            if (spanOut == null)
-            {
-                spanOut = currentStack.Peek();
-                if (spanOut.TraceSpan.SpanId == span2.TraceSpan.SpanId)
+                Span spanOut = null;
+                while (!currentStack.IsEmpty && currentStack.Peek().Disposed())
                 {
-                    TraceStack = currentStack.Pop(out spanOut);
+                    currentStack = currentStack.Pop(out spanOut);
                 }
-                else
-                {
-                    TraceStack = currentStack;
-                }
-            }
-            else
-            {
+               
                 TraceStack = currentStack;
             }
 
             lock (_traceLock)
             {
-                _trace.Spans.Add(spanOut.TraceSpan);
+                _trace.Spans.Add(span.TraceSpan);
 
                 var newOpenSpanCount = Interlocked.Decrement(ref _openSpanCount);
                 Debug.Assert(newOpenSpanCount >= 0, "Invalid open span count");
@@ -268,6 +269,8 @@ namespace Google.Cloud.Diagnostics.Common
         /// </summary>
         private ulong? GetCurrentSpanId(ImmutableStack<Span> traceStack)
         {
+            return traceStack.IsEmpty? _rootSpanParentId : traceStack.Peek().TraceSpan.SpanId;
+            /*
             if (traceStack.IsEmpty)
             {
                 return _rootSpanParentId;
@@ -283,7 +286,7 @@ namespace Google.Cloud.Diagnostics.Common
             {
                 return traceStack.Peek().TraceSpan.SpanId;
             }
-            return  _rootSpanParentId;
+            return  _rootSpanParentId;*/
         }
 
 

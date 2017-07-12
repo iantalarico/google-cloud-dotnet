@@ -27,9 +27,19 @@ namespace Google.Cloud.Diagnostics.Common
         /// <summary>
         /// A disposable class that does nothing when disposed.
         /// </summary>
-        private class NullDisposable : IDisposable
+        internal class Span : ISpan
         {
-            public void Dispose() { }
+            private bool _disposed = false;
+            public void AnnotateSpan(Dictionary<string, string> labels) { }
+            public IManagedTracer CreateManagedTracer() => NullManagedTracer.Instance;
+
+            public void Dispose() => _disposed = true;
+
+            public void SetStackTrace(StackTrace stackTrace) {}
+
+            public ulong SpanId() => 0;
+
+            public bool Disposed() => _disposed;
         }
 
         /// <summary>
@@ -41,7 +51,7 @@ namespace Google.Cloud.Diagnostics.Common
         /// Does nothing.
         /// </summary>
         /// <returns>Returns an <see cref="IDisposable"/> that does nothing when disposed.</returns>
-        public IDisposable StartSpan(string name, StartSpanOptions options = null) => new NullDisposable();
+        public ISpan StartSpan(string name, StartSpanOptions options = null) => new Span();
 
         /// <summary>
         /// Calls <paramref name="action"/>.

@@ -498,6 +498,61 @@ namespace Google.Cloud.Diagnostics.Common.Tests
         }
 
         [Fact]
+        public async Task DisjointThreads()
+        {
+            var mockConsumer = new Mock<IConsumer<TraceProto>>();
+            var tracer = SimpleManagedTracer.Create(mockConsumer.Object, ProjectId, TraceId);
+            mockConsumer.Setup(c => c.Receive(
+                Match.Create<IEnumerable<TraceProto>>(
+                    tProto => IsValidSpan(tProto.Single().Spans.Single(), "span-name"))));
+
+            var tcs1 = new TaskCompletionSource<bool>();
+            var tcs2 = new TaskCompletionSource<bool>();
+            IDisposable span = null;
+            Exception ex = null;
+            Thread t = new Thread(() =>
+            {
+                try
+                {
+                    span = tracer.StartSpan("span-name");
+                }
+                catch (Exception e)
+                {
+                    ex = e;
+                    throw;
+                }
+                finally
+                {
+                    tcs1.SetResult(true);
+                }
+            });
+            Thread t2 = new Thread(() =>
+            {
+                try
+                {
+                    span.Dispose();
+                }
+                catch (Exception e)
+                {
+                    ex = e;
+                    throw;
+                }
+                finally
+                {
+                    tcs2.SetResult(true);
+                }
+            });
+
+            t.Start();
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+            t2.Start();
+
+            await Task.WhenAll(tcs1.Task, tcs2.Task);
+            Assert.Null(ex);
+            mockConsumer.VerifyAll();
+        }
+
+        [Fact]
         public void IncompleteSpans()
         {
             var mockConsumer = new Mock<IConsumer<TraceProto>>();

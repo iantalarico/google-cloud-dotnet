@@ -38,7 +38,7 @@ namespace Google.Cloud.Diagnostics.AspNetCore.Tests
         {
             var tracerMock = new Mock<IManagedTracer>();
             tracerMock.Setup(t => t.GetCurrentTraceId()).Returns(_traceHeaderContext.TraceId);
-            tracerMock.Setup(t => t.StartSpan(context.Request.Path, null));
+            tracerMock.Setup(t => t.StartSpan(context.Request.Path, null)).Returns(new NullManagedTracer.Span());
             tracerMock.Setup(t => t.AnnotateSpan(It.IsAny<Dictionary<string, string>>()));
             return tracerMock;
         }

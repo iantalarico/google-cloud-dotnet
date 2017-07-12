@@ -34,7 +34,7 @@ namespace Google.Cloud.Diagnostics.Common
         }
 
         /// <inheritdoc />
-        public IDisposable StartSpan(string name, StartSpanOptions options = null) =>
+        public ISpan StartSpan(string name, StartSpanOptions options = null) =>
            _managedTracerGetter().StartSpan(name, options);
 
         /// <inheritdoc />
