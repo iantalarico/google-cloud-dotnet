@@ -506,15 +506,112 @@ namespace Google.Cloud.Diagnostics.Common.Tests
                 Match.Create<IEnumerable<TraceProto>>(
                     tProto => IsValidSpan(tProto.Single().Spans.Single(), "span-name"))));
 
+            ISpan span = null;
+            await RunInDisjointThreads(() => span = tracer.StartSpan("span-name"), () => span.Dispose());
+            mockConsumer.VerifyAll();
+        }
+
+        [Fact]
+        public async Task DisjointThreads_Annotate()
+        {
+            var mockConsumer = new Mock<IConsumer<TraceProto>>();
+            var tracer = SimpleManagedTracer.Create(mockConsumer.Object, ProjectId, TraceId);
+            mockConsumer.Setup(c => c.Receive(
+                Match.Create<IEnumerable<TraceProto>>(
+                    tProto => IsValidSpan(tProto.Single().Spans.Single(), "span-name"))));
+
+            var annotation = new Dictionary<string, string> { { "new", "label" } };
+
+            Predicate<IEnumerable<TraceProto>> matcher = t =>
+            {
+                var singleSpan = t.Single().Spans.Single();
+                return IsValidSpan(singleSpan, "span-name") &&
+                    string.IsNullOrWhiteSpace(singleSpan.Labels[TraceLabels.StackTrace]) &&
+                    TraceUtils.IsValidAnnotation(singleSpan, annotation);
+            };
+            mockConsumer.Setup(c => c.Receive(Match.Create(matcher)));
+
+            ISpan span = null;
+            await RunInDisjointThreads(() => span = tracer.StartSpan("span-name"), 
+                () =>
+                {
+                    span.SetStackTrace(FilledStackTrace);
+                    span.AnnotateSpan(annotation);
+                    span.Dispose();
+                });
+            mockConsumer.Verify();
+        }
+
+        [Fact]
+        public async Task DisjointThreads_Annotate_Fail()
+        {
+            var mockConsumer = new Mock<IConsumer<TraceProto>>();
+            var tracer = SimpleManagedTracer.Create(mockConsumer.Object, ProjectId, TraceId);
+
+            ISpan span = null;
+            await RunInDisjointThreads(() => span = tracer.StartSpan("span-name"), () =>
+            {
+                tracer.SetStackTrace(FilledStackTrace);
+                span.Dispose();
+            }, new InvalidOperationException());
+            mockConsumer.Verify(c => c.Receive(It.IsAny<IEnumerable<TraceProto>>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task DisjointThreads_MultipleSpans()
+        {
+            var mockConsumer = new Mock<IConsumer<TraceProto>>();
+            var tracer = SimpleManagedTracer.Create(mockConsumer.Object, ProjectId, TraceId);
+
+            ISpan span = null;
+
+            Predicate<IEnumerable<TraceProto>> singleChild = t =>
+            {
+                var singleSpan = t.Single().Spans.Single();
+                return IsValidSpan(singleSpan, "child-two", span.SpanId());
+            };
+            Predicate<IEnumerable<TraceProto>> childParent = t =>
+            {
+                var spans = t.Single().Spans;
+                return spans.Count == 2 &&
+                    IsValidSpan(spans[0], "child-one", spans[1].SpanId) &&
+                    IsValidSpan(spans[1], "parent");
+            };
+            mockConsumer.Setup(c => c.Receive(Match.Create(singleChild)));
+            mockConsumer.Setup(c => c.Receive(Match.Create(childParent)));
+
+            await RunInDisjointThreads(() =>
+            {
+                span = tracer.StartSpan("parent");
+                tracer.StartSpan("child-one").Dispose();
+            }, () =>
+            {
+                var tracer2 = span.CreateManagedTracer();
+                tracer2.StartSpan("child-two").Dispose();
+                span.Dispose();
+            });
+
+            mockConsumer.VerifyAll();
+        }
+
+        /// <summary>
+        /// Runs two actions in separate disjoint threads.  The first thread will always finish before
+        /// the second.
+        /// </summary>
+        /// <param name="actionOne">The first action to run.</param>
+        /// <param name="actionTwo">The second action to run.  If expectedException is not null, this action
+        ///     is expected to throw an exception with the type of expectedException.</param>
+        /// <param name="expectedException">Optional, an exception excepted to be thrown in actionTwo.</param>
+        private async Task RunInDisjointThreads(Action actionOne, Action actionTwo, Exception expectedException = null)
+        {
             var tcs1 = new TaskCompletionSource<bool>();
             var tcs2 = new TaskCompletionSource<bool>();
-            IDisposable span = null;
             Exception ex = null;
             Thread t = new Thread(() =>
             {
                 try
                 {
-                    span = tracer.StartSpan("span-name");
+                    actionOne();
                 }
                 catch (Exception e)
                 {
@@ -530,7 +627,15 @@ namespace Google.Cloud.Diagnostics.Common.Tests
             {
                 try
                 {
-                    span.Dispose();
+                    if (expectedException == null)
+                    {
+                        var temp = tcs1.Task.Result;
+                        actionTwo();
+                    }
+                    else
+                    {
+                        Assert.Throws(expectedException.GetType(), actionTwo);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -548,8 +653,10 @@ namespace Google.Cloud.Diagnostics.Common.Tests
             t2.Start();
 
             await Task.WhenAll(tcs1.Task, tcs2.Task);
-            Assert.Null(ex);
-            mockConsumer.VerifyAll();
+            if (expectedException == null)
+            {
+                Assert.Null(ex);
+            }
         }
 
         [Fact]

@@ -204,7 +204,6 @@ namespace Google.Cloud.Diagnostics.Common
                 {
                     currentStack = currentStack.Pop(out spanOut);
                 }
-               
                 TraceStack = currentStack;
             }
 
